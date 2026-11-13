@@ -249,7 +249,14 @@
         const n = await svc.getCharacteristic(NOTIFY_CHAR);
         await n.startNotifications();
         n.addEventListener('characteristicvaluechanged', ev => {
-          log(nm + ' notify: ' + hex(new Uint8Array(ev.target.value.buffer)));
+          const v = new Uint8Array(ev.target.value.buffer);
+          log(nm + ' notify: ' + hex(v));
+          if (v.length >= 3 && v[0] === 0x02 && v[1] === 0xd5) {
+            if (v[2] === 0x20) c.recording = true;
+            else if (v[2] === 0x00) c.recording = false;
+            syncMasterState();
+            renderCameras();
+          }
         });
       } catch (e) { log(nm + ': no notify (' + e.message + ')'); }
     }
@@ -277,6 +284,7 @@
     // Send the record toggle (press + release) to a set of cameras at the same moment.
     async function toggle(list) {
       const t0 = performance.now();
+      list.forEach(c => { c._before = c.recording; });
       const downs = await Promise.allSettled(list.map(c =>
         write(c, REC_DOWN).then(() => performance.now() - t0)));
       await Promise.allSettled(list.map(c => write(c, REC_UP)));
@@ -284,7 +292,7 @@
       list.forEach((c, i) => {
         const r = downs[i];
         if (r.status === 'fulfilled') {
-          c.recording = !c.recording;
+          c.recording = !c._before;
           log(nameOf(c) + ': sent at +' + Math.round(r.value) + ' ms');
         } else {
           failed.push(nameOf(c));
@@ -296,18 +304,30 @@
       return { sent: list.length - failed.length, failed: failed };
     }
 
-    async function autoReconnect(c, tries) {
-      for (let i = 0; i < tries; i++) {
-        await sleep(1500);
-        if (c.removed || connected(c)) return;
+    // Keeps trying (every ~3 s) until the camera is back, e.g. after it was switched off or slept.
+    async function startReconnectLoop(c) {
+      if (c.reconnecting || c.removed) return;
+      c.reconnecting = true;
+      renderCameras();
+      while (!c.removed && !connected(c)) {
         try {
           await openChannel(c);
-          log('Auto-reconnected ' + nameOf(c));
-          renderCameras();
-          return;
-        } catch (e) {}
+          break;
+        } catch (e) {
+          log('Reconnect attempt failed for ' + nameOf(c) + ': ' + e.message);
+          await sleep(3000);
+        }
       }
+      c.reconnecting = false;
       renderCameras();
+      if (c.removed || !connected(c)) return;
+      log('Reconnected ' + nameOf(c));
+      if (c.wasRecording) {
+        c.wasRecording = false;
+        showToast(nameOf(c) + ' is back - check if it is still recording (tap REC/STBY to fix the label)', 6000);
+      } else {
+        showToast(nameOf(c) + ' reconnected');
+      }
     }
 
     // Keep the screen awake while the app is open.
@@ -335,13 +355,16 @@
           showToast((device.name || 'Camera') + ' is already added');
           return;
         }
-        c = { uid: 'cam-' + (++uidCounter), device: device, server: null, char: null, recording: false, noResp: false, removed: false };
+        c = { uid: 'cam-' + (++uidCounter), device: device, server: null, char: null, recording: false, noResp: false, removed: false, reconnecting: false, wasRecording: false };
         cameras.push(c);
         device.addEventListener('gattserverdisconnected', () => {
           c.char = null;
           log(nameOf(c) + ' disconnected');
+          if (c.recording) c.wasRecording = true;
+          c.recording = false;   // a camera that dropped (e.g. switched off) is not recording any more
+          syncMasterState();
           renderCameras();
-          if (!c.removed) autoReconnect(c, 4);
+          if (!c.removed) startReconnectLoop(c);
         });
         renderCameras();
         showToast('Connecting to ' + nameOf(c) + '...');
@@ -357,13 +380,12 @@
       }
     }
 
-    async function reconnectCamera(uid) {
+    function reconnectCamera(uid) {
       const c = findCam(uid);
       if (!c) return;
+      if (c.reconnecting) { showToast('Already trying to reconnect ' + nameOf(c) + '...'); return; }
       showToast('Reconnecting ' + nameOf(c) + '...');
-      try { await openChannel(c); log('Reconnected ' + nameOf(c)); showToast(nameOf(c) + ' connected'); }
-      catch (e) { log('Reconnect failed: ' + e.message); showToast('Reconnect failed: ' + e.message, 4500); }
-      renderCameras();
+      startReconnectLoop(c);
     }
 
     function removeCamera(uid) {
@@ -526,7 +548,7 @@
             <div class="min-w-0">
               <div class="text-sm font-bold text-zinc-100 truncate">${esc(nameOf(cam))}</div>
               <div class="text-[11px] text-zinc-500 flex items-center gap-1.5">
-                <span class="w-1.5 h-1.5 rounded-full ${isConn ? 'bg-emerald-500' : 'bg-amber-500'}"></span> ${isConn ? 'Connected' : 'Disconnected'}
+                <span class="w-1.5 h-1.5 rounded-full ${isConn ? 'bg-emerald-500' : ('bg-amber-500' + (cam.reconnecting ? ' animate-rec' : ''))}"></span> ${isConn ? 'Connected' : (cam.reconnecting ? 'Reconnecting...' : 'Disconnected')}
               </div>
             </div>
           </div>
