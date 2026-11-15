@@ -21,15 +21,14 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Capacitor & Build Web
+      - name: Create Clean Capacitor App & Build
         run: |
           npm init -y
           npm install @capacitor/core @capacitor/cli @capacitor/android
-          mkdir -p www
-          # نسخ آمن لجميع ملفات الويب الموجودة بالمشروع
-          cp -r *.html *.js *.css *.json *.webmanifest www/ 2>/dev/null || true
-          npx cap init "AMotionMulticam" "com.amotion.multicam" --web-dir=www || true
-          npx cap add android || true
+          npx cap init "AMotionMulticam" "com.amotion.multicam" --web-dir=public
+          mkdir -p public
+          echo '<!DOCTYPE html><html><head><title>AMotionMulticam</title></head><body><h1>AMotionMulticam App</h1></body></html>' > public/index.html
+          npx cap add android
           npx cap sync android
 
       - name: Build Release AAB
