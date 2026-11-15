@@ -26,7 +26,12 @@ jobs:
           npm init -y
           npm install @capacitor/core @capacitor/cli @capacitor/android
           mkdir -p www
-          cp index.html manifest.webmanifest sw.js icon-*.png www/ 2>/dev/null || true
+          cp *.html www/ 2>/dev/null || true
+          cp *.js www/ 2>/dev/null || true
+          cp *.json www/ 2>/dev/null || true
+          cp *.webmanifest www/ 2>/dev/null || true
+          cp -r icons/ www/icons/ 2>/dev/null || true
+          cp -r img/ www/img/ 2>/dev/null || true
           npx cap init "AMotionMulticam" "com.amotion.multicam" --web-dir=www || true
           npx cap add android || true
           npx cap sync android
