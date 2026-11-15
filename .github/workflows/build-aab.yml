@@ -16,9 +16,6 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Build Complete Android Project
         run: |
           mkdir -p app/src/main/assets/public
@@ -50,7 +47,7 @@ jobs:
           include ':app'
           EOF
 
-          # 2. إنشاء ملف build.gradle الرئيسي (اللي كان ناقص)
+          # 2. إنشاء ملف build.gradle الرئيسي
           cat << 'EOF' > build.gradle
           plugins {
               id 'com.android.application' version '8.2.2' apply false
