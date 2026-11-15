@@ -485,6 +485,7 @@
     }
 
     async function handleStartAll() {
+      unlockAudio();
       if (sending) return;
       if (cameras.length === 0) { showToast('Add a camera first'); return; }
       const skipped = cameras.filter(c => !connected(c)).map(nameOf);
@@ -501,6 +502,7 @@
     }
 
     async function handleStopAll() {
+      unlockAudio();
       if (sending) return;
       if (cameras.length === 0) return;
       const skipped = cameras.filter(c => !connected(c)).map(nameOf);
@@ -551,7 +553,58 @@
     let h8Remind = true;
     try { if (localStorage.getItem('h8Remind') === '0') h8Remind = false; } catch (e) {}
 
+    // ---- Reminder sound (3 beeps + vibration), repeated every 8 s until you tap "H8 stopped" ----
+    let audioCtx = null;
+    let h8Nag = null;
+
+    function unlockAudio() {     // must run inside a tap so the browser allows sound later
+      try {
+        const AC = (typeof AudioContext !== 'undefined') ? AudioContext : window.webkitAudioContext;
+        if (!AC) return;
+        if (!audioCtx) audioCtx = new AC();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+      } catch (e) {}
+    }
+
+    function playReminderSound() {
+      try {
+        unlockAudio();
+        if (audioCtx) {
+          const t0 = audioCtx.currentTime + 0.05;
+          for (let i = 0; i < 3; i++) {
+            const o = audioCtx.createOscillator();
+            const g = audioCtx.createGain();
+            o.type = 'sine';
+            o.frequency.value = 880;
+            const t = t0 + i * 0.3;
+            g.gain.setValueAtTime(0.0001, t);
+            g.gain.exponentialRampToValueAtTime(0.5, t + 0.02);
+            g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+            o.connect(g);
+            g.connect(audioCtx.destination);
+            o.start(t);
+            o.stop(t + 0.22);
+          }
+        }
+      } catch (e) {}
+      try { if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 200]); } catch (e) {}
+    }
+
+    function stopH8Nag() {
+      if (h8Nag) { clearInterval(h8Nag); h8Nag = null; }
+    }
+
+    function startH8Nag() {
+      stopH8Nag();
+      playReminderSound();
+      h8Nag = setInterval(() => {
+        if (h8State !== 'stopme' || !h8Remind) stopH8Nag();
+        else playReminderSound();
+      }, 8000);
+    }
+
     function toggleH8() {
+      unlockAudio();
       h8State = (h8State === 'idle') ? 'rec' : 'idle';
       renderH8();
     }
@@ -564,6 +617,7 @@
     }
 
     function renderH8() {
+      if (h8State !== 'stopme' || !h8Remind) stopH8Nag();
       const card = document.getElementById('h8Card');
       const st = document.getElementById('h8Status');
       const btn = document.getElementById('btnH8');
@@ -607,6 +661,7 @@
       if (h8Remind && h8State === 'rec') {
         h8State = 'stopme';
         renderH8();
+        startH8Nag();
         if (clean) showToast('Cameras stopped. Now press STOP on the H8!', 6000);
       }
     }
