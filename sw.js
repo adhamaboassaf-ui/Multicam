@@ -1,4 +1,4 @@
-var CACHE = 'amotion-multicam-v6';
+var CACHE = 'amotion-multicam-v7';
 var FILES = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', function (e) {

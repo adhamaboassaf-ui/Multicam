@@ -97,6 +97,24 @@
       </button>
     </div>
 
+    <!-- Zoom H8 reminder -->
+    <div id="h8Card" class="rounded-xl bg-zinc-900/70 border border-zinc-800 px-4 py-3 flex items-center justify-between gap-3 transition-colors">
+      <div class="min-w-0">
+        <div class="text-sm font-semibold text-zinc-200">Zoom H8</div>
+        <div id="h8Status" class="text-[11px] leading-snug text-zinc-500">Press REC on the H8, then tap the button</div>
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        <button id="btnH8" onclick="toggleH8()"
+          class="tactile-btn px-3.5 py-2 rounded-lg text-xs font-extrabold tracking-wide cursor-pointer bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700">H8 REC</button>
+        <button id="btnH8Remind" onclick="toggleH8Remind()" aria-label="H8 reminder on/off" title="H8 reminder on/off"
+          class="tactile-btn p-2 rounded-lg border cursor-pointer text-rose-400 border-rose-500/40 bg-rose-950/20">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
+          </svg>
+        </button>
+      </div>
+    </div>
+
     <!-- Add Camera Action Button -->
     <button id="btnAddCamera" onclick="openAddCameraModal()"
       class="tactile-btn w-full rounded-xl bg-zinc-900 hover:bg-zinc-800/90 border border-dashed border-zinc-700 hover:border-zinc-500 py-3.5 px-4 flex items-center justify-center gap-2 text-sm font-semibold text-zinc-200 cursor-pointer">
@@ -475,6 +493,9 @@
         showToast(skipped.length ? 'No camera connected - tap Reconnect' : 'Already recording', 3500);
         return;
       }
+      if (h8Remind && h8State !== 'rec') {
+        if (!confirm('The H8 is not marked as recording.\n\nPress REC on the H8, then tap "H8 REC".\n\nStart the cameras anyway?')) return;
+      }
       sending = true;
       try { summarize('REC', await toggle(list), skipped); } finally { sending = false; }
     }
@@ -485,11 +506,16 @@
       const skipped = cameras.filter(c => !connected(c)).map(nameOf);
       const list = cameras.filter(c => connected(c) && c.recording);
       if (!list.length) {
-        showToast(skipped.length ? 'No camera connected - tap Reconnect' : 'Nothing is recording', 3500);
+        if (h8Remind && h8State === 'rec') h8AfterStop(true);
+        else showToast(skipped.length ? 'No camera connected - tap Reconnect' : 'Nothing is recording', 3500);
         return;
       }
       sending = true;
-      try { summarize('STOP', await toggle(list), skipped); } finally { sending = false; }
+      try {
+        const res = await toggle(list);
+        summarize('STOP', res, skipped);
+        h8AfterStop(!res.failed.length && !skipped.length);
+      } finally { sending = false; }
     }
 
     // 2-second test: start recording on one camera, then stop it.
@@ -517,6 +543,72 @@
       const chevron = document.getElementById('testChevron');
       drawer.classList.toggle('hidden');
       chevron.classList.toggle('rotate-90');
+    }
+
+    // ================= Zoom H8 reminder =================
+    // idle -> (you press REC on the H8, tap the button) -> rec -> (Stop All) -> stopme -> (you stop the H8, tap) -> idle
+    let h8State = 'idle';
+    let h8Remind = true;
+    try { if (localStorage.getItem('h8Remind') === '0') h8Remind = false; } catch (e) {}
+
+    function toggleH8() {
+      h8State = (h8State === 'idle') ? 'rec' : 'idle';
+      renderH8();
+    }
+
+    function toggleH8Remind() {
+      h8Remind = !h8Remind;
+      try { localStorage.setItem('h8Remind', h8Remind ? '1' : '0'); } catch (e) {}
+      renderH8();
+      showToast(h8Remind ? 'H8 reminder on' : 'H8 reminder off');
+    }
+
+    function renderH8() {
+      const card = document.getElementById('h8Card');
+      const st = document.getElementById('h8Status');
+      const btn = document.getElementById('btnH8');
+      const bell = document.getElementById('btnH8Remind');
+      const base = 'tactile-btn px-3.5 py-2 rounded-lg text-xs font-extrabold tracking-wide cursor-pointer ';
+      const cardBase = 'rounded-xl border px-4 py-3 flex items-center justify-between gap-3 transition-colors ';
+      bell.className = 'tactile-btn p-2 rounded-lg border cursor-pointer ' + (h8Remind
+        ? 'text-rose-400 border-rose-500/40 bg-rose-950/20'
+        : 'text-zinc-500 border-zinc-700 bg-zinc-900');
+      if (!h8Remind) {
+        card.className = cardBase + 'bg-zinc-900/40 border-zinc-800/70 opacity-70';
+        st.className = 'text-[11px] leading-snug text-zinc-500';
+        st.textContent = 'Reminder off';
+        btn.classList.add('hidden');
+        return;
+      }
+      btn.classList.remove('hidden');
+      if (h8State === 'rec') {
+        card.className = cardBase + 'bg-rose-950/25 border-rose-500/40';
+        st.className = 'text-[11px] leading-snug text-rose-400';
+        st.textContent = 'H8 is recording';
+        btn.className = base + 'bg-rose-600 text-white shadow-sm shadow-rose-950';
+        btn.textContent = 'H8 REC \u2713';
+      } else if (h8State === 'stopme') {
+        card.className = cardBase + 'bg-amber-950/20 border-amber-500/40';
+        st.className = 'text-[11px] leading-snug text-amber-300';
+        st.textContent = 'Now press STOP on the H8, then tap';
+        btn.className = base + 'bg-amber-500/20 text-amber-300 border border-amber-500/40';
+        btn.textContent = 'H8 stopped';
+      } else {
+        card.className = cardBase + 'bg-zinc-900/70 border-zinc-800';
+        st.className = 'text-[11px] leading-snug text-zinc-500';
+        st.textContent = 'Press REC on the H8, then tap the button';
+        btn.className = base + 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700';
+        btn.textContent = 'H8 REC';
+      }
+    }
+
+    // Called when the cameras were stopped: remind to stop the H8 too.
+    function h8AfterStop(clean) {
+      if (h8Remind && h8State === 'rec') {
+        h8State = 'stopme';
+        renderH8();
+        if (clean) showToast('Cameras stopped. Now press STOP on the H8!', 6000);
+      }
     }
 
     // ================= Master tally / timecode (display) =================
@@ -640,6 +732,7 @@
     }
 
     renderCameras();
+    renderH8();
   </script>
   <script>
     // Lets the app be installed and opened offline once it has loaded.
