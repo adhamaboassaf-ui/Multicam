@@ -10,35 +10,107 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Create Clean Capacitor App & Build
+      - name: Create Web-to-Android Structure
         run: |
-          npm init -y
-          npm install @capacitor/core @capacitor/cli @capacitor/android
-          npx cap init "AMotionMulticam" "com.amotion.multicam" --web-dir=public
-          mkdir -p public
-          echo '<!DOCTYPE html><html><head><title>AMotionMulticam</title></head><body><h1>AMotionMulticam App</h1></body></html>' > public/index.html
-          npx cap add android
-          npx cap sync android
+          mkdir -p app/src/main/assets/public
+          mkdir -p app/src/main/java/com/amotion/multicam
+          
+          # نسخ ملفاتك أو إنشاء صفحة أساسية
+          if [ -f index.html ]; then
+            cp index.html app/src/main/assets/public/
+          else
+            echo '<!DOCTYPE html><html><body><h1>AMotionMulticam</h1></body></html>' > app/src/main/assets/public/index.html
+          end
+
+          # إنشاء ملفات الـ Android الأساسية تلقائياً
+          cat << 'EOF' > app/build.gradle
+          plugins {
+              id 'com.android.application'
+          }
+          android {
+              namespace 'com.amotion.multicam'
+              compileSdk 34
+              defaultConfig {
+                  applicationId "com.amotion.multicam"
+                  minSdk 22
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                  }
+              }
+          }
+          dependencies {
+              implementation 'androidx.appcompat:appcompat:1.6.1'
+          }
+          EOF
+
+          cat << 'EOF' > settings.gradle
+          rootProject.name = "AMotionMulticam"
+          include ':app'
+          EOF
+
+          cat << 'EOF' > app/src/main/AndroidManifest.xml
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              package="com.amotion.multicam">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <application
+                  android:allowBackup="true"
+                  android:icon="@mipmap/ic_launcher"
+                  android:label="AMotionMulticam"
+                  android:theme="@style/Theme.AppCompat.Light.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat << 'EOF' > app/src/main/java/com/amotion/multicam/MainActivity.kt
+          package com.amotion.multicam
+          import android.os.Bundle
+          import android.webkit.WebView
+          import androidx.appcompat.app.AppCompatActivity
+
+          class MainActivity : AppCompatActivity() {
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  val webView = WebView(this)
+                  webView.settings.javaScriptEnabled = true
+                  webView.loadUrl("file:///android_asset/public/index.html")
+                  setContentView(webView)
+              }
+          }
+          EOF
+
+          cat << 'EOF' > local.properties
+          sdk.dir=/usr/local/lib/android/sdk
+          EOF
+
+          chmod +x gradlew || true
 
       - name: Build Release AAB
         run: |
-          cd android
-          chmod +x gradlew
+          # تحميل وإنشاء ملف الـ gradle wrapper تلقائياً إذا مش موجود
+          gradle wrapper
           ./gradlew bundleRelease
 
       - name: Upload AAB Artifact
         uses: actions/upload-artifact@v4
         with:
           name: AMotionMulticam-AAB
-          path: android/app/build/outputs/bundle/release/*.aab
+          path: app/build/outputs/bundle/release/*.aab
