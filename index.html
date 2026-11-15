@@ -597,7 +597,7 @@
         sy.cancel();
         const u = new SpeechSynthesisUtterance(text);
         u.lang = 'en-US';
-        u.rate = 0.95;
+        u.rate = 0.9;
         u.pitch = 1.05;
         u.volume = 1;
         const v = pickFemaleVoice();
@@ -617,7 +617,7 @@
     // After Stop All: vibrate + "Please press stop record zoom", repeated every 8 s until you tap "H8 stopped".
     function startH8Nag() {
       stopH8Nag();
-      const nag = () => { vibrate([200, 100, 200, 100, 200]); speak('Please press stop record zoom'); };
+      const nag = () => { vibrate([200, 100, 200, 100, 200]); speak('Please press stop on the Zoom.'); };
       nag();
       h8Nag = setInterval(() => {
         if (h8State !== 'stopme' || !h8Remind) stopH8Nag();
@@ -698,7 +698,7 @@
     function h8Blocked() {
       showToast('Press REC on the H8 first, then tap "H8 REC"', 4500);
       vibrate([200, 100, 200]);
-      speak('Press zoom record');
+      speak('Please press record on the Zoom.');
       const card = document.getElementById('h8Card');
       card.classList.add('animate-rec');
       setTimeout(() => card.classList.remove('animate-rec'), 1800);
