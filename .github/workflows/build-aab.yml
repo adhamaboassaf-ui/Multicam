@@ -16,19 +16,20 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Create Web-to-Android Structure
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Create Native Android Project
         run: |
           mkdir -p app/src/main/assets/public
           mkdir -p app/src/main/java/com/amotion/multicam
           
-          # نسخ ملفاتك أو إنشاء صفحة أساسية
           if [ -f index.html ]; then
             cp index.html app/src/main/assets/public/
           else
             echo '<!DOCTYPE html><html><body><h1>AMotionMulticam</h1></body></html>' > app/src/main/assets/public/index.html
-          end
+          fi
 
-          # إنشاء ملفات الـ Android الأساسية تلقائياً
           cat << 'EOF' > app/build.gradle
           plugins {
               id 'com.android.application'
@@ -65,7 +66,6 @@ jobs:
               <uses-permission android:name="android.permission.INTERNET" />
               <application
                   android:allowBackup="true"
-                  android:icon="@mipmap/ic_launcher"
                   android:label="AMotionMulticam"
                   android:theme="@style/Theme.AppCompat.Light.NoActionBar">
                   <activity
@@ -97,17 +97,14 @@ jobs:
           }
           EOF
 
-          cat << 'EOF' > local.properties
-          sdk.dir=/usr/local/lib/android/sdk
-          EOF
-
-          chmod +x gradlew || true
+          # إنشاء ملفات الـ Gradle الأساسية للبناء
+          sdkmanager "build-tools;34.0.0" "platforms;android-34"
+          gradle init --type basic --automation-language groovy --project-name AMotionMulticam --dsl groovy --use-defaults --quiet || true
 
       - name: Build Release AAB
         run: |
-          # تحميل وإنشاء ملف الـ gradle wrapper تلقائياً إذا مش موجود
-          gradle wrapper
-          ./gradlew bundleRelease
+          # استخدام gradle مباشر للبناء بدون الحاجة لملفات wrapper معقدة
+          gradle bundleRelease
 
       - name: Upload AAB Artifact
         uses: actions/upload-artifact@v4
