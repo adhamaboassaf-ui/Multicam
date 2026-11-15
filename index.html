@@ -125,6 +125,14 @@
         <div id="testCameraList" class="flex flex-wrap gap-2">
           <!-- Populated dynamically -->
         </div>
+        <div class="mt-3 pt-3 border-t border-zinc-800/70">
+          <p class="text-xs text-zinc-400 mb-2">Read-only check: reads every readable value from the camera's extra services to look for the battery level. Compare the numbers with the battery % shown on the camera.</p>
+          <button onclick="probeAll()"
+            class="tactile-btn px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-xs font-semibold text-zinc-200 cursor-pointer">
+            Read camera info
+          </button>
+          <pre id="probeOut" class="select-text mt-2.5 max-h-72 overflow-auto rounded-lg bg-zinc-950/70 border border-zinc-800 p-2.5 text-[10px] leading-relaxed font-mono text-zinc-300 whitespace-pre-wrap"></pre>
+        </div>
       </div>
     </div>
 
@@ -302,6 +310,48 @@
       syncMasterState();
       renderCameras();
       return { sent: list.length - failed.length, failed: failed };
+    }
+
+    // ---- Read-only probe: look for the battery level in the extra Sony services ----
+    const PROBE_SERVICES = [
+      '8000cc00-cc00-ffff-ffff-ffffffffffff',
+      '8000dd00-dd00-ffff-ffff-ffffffffffff',
+      '8000ee00-ee00-ffff-ffff-ffffffffffff'
+    ];
+    function shortId(uuid) { return uuid.slice(4, 8); }
+
+    async function probeCamera(c) {
+      const lines = ['== ' + nameOf(c) + ' (' + new Date().toLocaleTimeString() + ') =='];
+      for (const su of PROBE_SERVICES) {
+        let svc;
+        try { svc = await c.device.gatt.getPrimaryService(su); }
+        catch (e) { lines.push(shortId(su) + ': service not available (' + e.message + ')'); continue; }
+        let chars = [];
+        try { chars = await svc.getCharacteristics(); }
+        catch (e) { lines.push(shortId(su) + ': cannot list (' + e.message + ')'); continue; }
+        for (const ch of chars) {
+          if (!ch.properties.read) continue;      // only characteristics that allow READ
+          try {
+            const dv = await ch.readValue();
+            const bytes = Array.from(new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength));
+            lines.push(shortId(ch.uuid) + ': ' + hex(bytes) + '   [' + bytes.join(' ') + ']');
+          } catch (e) { lines.push(shortId(ch.uuid) + ': read failed (' + e.message + ')'); }
+        }
+      }
+      return lines.join('\n');
+    }
+
+    async function probeAll() {
+      const out = document.getElementById('probeOut');
+      const list = cameras.filter(connected);
+      if (!list.length) { showToast('Connect a camera first'); return; }
+      if (sending) return;
+      sending = true;
+      out.textContent = 'Reading...';
+      try {
+        const parts = [];
+        for (const c of list) { parts.push(await probeCamera(c)); out.textContent = parts.join('\n\n'); }
+      } finally { sending = false; }
     }
 
     // Keeps trying (every ~3 s) until the camera is back, e.g. after it was switched off or slept.
