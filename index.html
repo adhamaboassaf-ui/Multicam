@@ -494,9 +494,7 @@
         showToast(skipped.length ? 'No camera connected - tap Reconnect' : 'Already recording', 3500);
         return;
       }
-      if (h8Remind && h8State !== 'rec') {
-        if (!confirm('The H8 is not marked as recording.\n\nPress REC on the H8, then tap "H8 REC".\n\nStart the cameras anyway?')) return;
-      }
+      if (h8Remind && h8State !== 'rec') { h8Blocked(); return; }
       sending = true;
       try { summarize('REC', await toggle(list), skipped); } finally { sending = false; }
     }
@@ -654,6 +652,15 @@
         btn.className = base + 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700';
         btn.textContent = 'H8 REC';
       }
+    }
+
+    // Start All is refused until the H8 is marked as recording.
+    function h8Blocked() {
+      showToast('Press REC on the H8 first, then tap "H8 REC"', 4500);
+      try { if (navigator.vibrate) navigator.vibrate([100, 60, 100]); } catch (e) {}
+      const card = document.getElementById('h8Card');
+      card.classList.add('animate-rec');
+      setTimeout(() => card.classList.remove('animate-rec'), 1800);
     }
 
     // Called when the cameras were stopped: remind to stop the H8 too.
