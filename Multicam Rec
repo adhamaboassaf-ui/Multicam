@@ -1,0 +1,44 @@
+name: Build Android AAB
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Capacitor & Build Web
+        run: |
+          npm init -y
+          npm install @capacitor/core @capacitor/cli @capacitor/android
+          mkdir -p www
+          cp index.html manifest.webmanifest sw.js icon-*.png www/ 2>/dev/null || true
+          npx cap init "AMotionMulticam" "com.amotion.multicam" --web-dir=www || true
+          npx cap add android || true
+          npx cap sync android
+
+      - name: Build Release AAB
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew bundleRelease
+
+      - name: Upload AAB Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AMotionMulticam-AAB
+          path: android/app/build/outputs/bundle/release/*.aab
