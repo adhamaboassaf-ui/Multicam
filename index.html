@@ -121,50 +121,6 @@
       </div>
     </div>
 
-    <!-- Switch Logger: log live camera cuts, export an EDL -->
-    <div id="loggerCard" class="rounded-2xl bg-zinc-900/60 border border-zinc-800/90 p-3 flex flex-col gap-3">
-      <div class="flex items-center justify-between gap-2 px-1">
-        <span class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Switch Logger</span>
-        <span id="loggerStatus" class="text-[11px] text-zinc-500 text-right">Pick the opening camera</span>
-      </div>
-
-      <div class="grid grid-cols-3 gap-2">
-        <button id="btnCam1" onclick="logCut(1)" class="tactile-btn h-16 rounded-xl border text-lg font-extrabold tracking-wide cursor-pointer bg-zinc-800 text-zinc-300 border-zinc-700">CAM 1</button>
-        <button id="btnCam2" onclick="logCut(2)" class="tactile-btn h-16 rounded-xl border text-lg font-extrabold tracking-wide cursor-pointer bg-zinc-800 text-zinc-300 border-zinc-700">CAM 2</button>
-        <button id="btnCam3" onclick="logCut(3)" class="tactile-btn h-16 rounded-xl border text-lg font-extrabold tracking-wide cursor-pointer bg-zinc-800 text-zinc-300 border-zinc-700">CAM 3</button>
-      </div>
-
-      <div id="loggerList" class="font-mono-tc text-[11px] leading-relaxed text-zinc-400 px-1 min-h-[16px]"></div>
-
-      <div class="grid grid-cols-2 gap-2">
-        <select id="edlFps" onchange="onEdlSettings()" aria-label="Frame rate"
-          class="rounded-lg bg-zinc-800 border border-zinc-700 text-xs text-zinc-200 px-2 py-2.5">
-          <option value="23.976">23.976 fps</option>
-          <option value="24">24 fps</option>
-          <option value="25" selected>25 fps</option>
-          <option value="29.97">29.97 fps</option>
-          <option value="30">30 fps</option>
-        </select>
-        <select id="edlStart" onchange="onEdlSettings()" aria-label="Timeline start"
-          class="rounded-lg bg-zinc-800 border border-zinc-700 text-xs text-zinc-200 px-2 py-2.5">
-          <option value="00:00:00:00" selected>Timeline start 00:00:00:00</option>
-          <option value="01:00:00:00">Timeline start 01:00:00:00</option>
-        </select>
-      </div>
-
-      <div class="grid grid-cols-3 gap-2">
-        <button onclick="exportEdl()" class="tactile-btn px-2 py-2.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-xs font-semibold text-zinc-200 cursor-pointer">Export EDL</button>
-        <button onclick="copyEdl()" class="tactile-btn px-2 py-2.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-xs font-semibold text-zinc-200 cursor-pointer">Copy EDL</button>
-        <button onclick="copyCutList()" class="tactile-btn px-2 py-2.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-xs font-semibold text-zinc-200 cursor-pointer">Copy list</button>
-      </div>
-
-      <pre id="edlPreview" class="hidden select-text max-h-48 overflow-auto rounded-lg bg-zinc-950/70 border border-zinc-800 p-2.5 text-[10px] leading-relaxed font-mono text-zinc-300 whitespace-pre"></pre>
-
-      <p class="text-[11px] leading-relaxed text-zinc-500 px-1">
-        Pick the opening camera, press Start All, then tap CAM 1/2/3 at each cut. Stop All builds the EDL. Name the three clips <span class="text-zinc-300 font-medium">CAM1, CAM2, CAM3</span> before importing it in Premiere or DaVinci.
-      </p>
-    </div>
-
     <!-- Add Camera Action Button -->
     <button id="btnAddCamera" onclick="openAddCameraModal()"
       class="tactile-btn w-full rounded-xl bg-zinc-900 hover:bg-zinc-800/90 border border-dashed border-zinc-700 hover:border-zinc-500 py-3.5 px-4 flex items-center justify-center gap-2 text-sm font-semibold text-zinc-200 cursor-pointer">
@@ -546,12 +502,7 @@
       }
       if (h8Remind && h8State !== 'rec') { h8Blocked(); return; }
       sending = true;
-      try {
-        const tStart = performance.now();
-        const res = await toggle(list);
-        summarize('REC', res, skipped);
-        if (res.sent > 0) loggerBegin(tStart);
-      } finally { sending = false; }
+      try { summarize('REC', await toggle(list), skipped); } finally { sending = false; }
     }
 
     async function handleStopAll() {
@@ -561,17 +512,14 @@
       const skipped = cameras.filter(c => !connected(c)).map(nameOf);
       const list = cameras.filter(c => connected(c) && c.recording);
       if (!list.length) {
-        loggerEnd(performance.now());
         if (h8Remind && h8State === 'rec') h8AfterStop(true);
         else showToast(skipped.length ? 'No camera connected - tap Reconnect' : 'Nothing is recording', 3500);
         return;
       }
       sending = true;
       try {
-        const tStop = performance.now();
         const res = await toggle(list);
         summarize('STOP', res, skipped);
-        if (res.sent > 0) loggerEnd(tStop);
         h8AfterStop(!res.failed.length && !skipped.length);
       } finally { sending = false; }
     }
@@ -766,195 +714,6 @@
       }
     }
 
-    // ================= Switch Logger (live cuts -> CMX3600 EDL) =================
-    const EDL_FPS = {
-      '23.976': { real: 24000 / 1001, base: 24 },
-      '24':     { real: 24,           base: 24 },
-      '25':     { real: 25,           base: 25 },
-      '29.97':  { real: 30000 / 1001, base: 30 },
-      '30':     { real: 30,           base: 30 }
-    };
-    let take = { running: false, t0: 0, startCam: 1, cuts: [], tEnd: null, stamp: '' };
-    let lastTake = null;   // { cuts, tEnd, stamp } of the last finished take
-    let lastEdl = null;    // { text, list, name }
-
-    function edlFps() {
-      const v = document.getElementById('edlFps').value;
-      return EDL_FPS[v] ? v : '25';
-    }
-    function edlStart() {
-      return document.getElementById('edlStart').value === '01:00:00:00' ? '01:00:00:00' : '00:00:00:00';
-    }
-
-    function framesToTc(f, base) {
-      const ff = f % base;
-      const sec = Math.floor(f / base);
-      const pad = n => String(n).padStart(2, '0');
-      return pad(Math.floor(sec / 3600)) + ':' + pad(Math.floor(sec / 60) % 60) + ':' + pad(sec % 60) + ':' + pad(ff);
-    }
-
-    // Turns the cut log into contiguous segments (frames). Segments shorter than a frame are dropped.
-    function buildSegments(cuts, tEnd, real) {
-      const segs = [];
-      for (let i = 0; i < cuts.length; i++) {
-        const f0 = Math.round(cuts[i].t * real);
-        const f1 = Math.round((i + 1 < cuts.length ? cuts[i + 1].t : tEnd) * real);
-        if (f1 <= f0) continue;
-        const prev = segs[segs.length - 1];
-        if (prev && prev.cam === cuts[i].cam && prev.f1 === f0) { prev.f1 = f1; continue; }
-        segs.push({ cam: cuts[i].cam, f0: f0, f1: f1 });
-      }
-      return segs;
-    }
-
-    function buildEdl(segs, base, startKey, title) {
-      const off = startKey === '01:00:00:00' ? 3600 * base : 0;
-      const lines = ['TITLE: ' + title, 'FCM: NON-DROP FRAME', ''];
-      segs.forEach((sg, i) => {
-        const reel = 'CAM' + sg.cam;
-        lines.push(String(i + 1).padStart(3, '0') + '  ' + reel.padEnd(8) + ' V     C        ' +
-          [framesToTc(sg.f0, base), framesToTc(sg.f1, base), framesToTc(off + sg.f0, base), framesToTc(off + sg.f1, base)].join(' '));
-        lines.push('* FROM CLIP NAME: ' + reel);
-      });
-      return lines.join('\n') + '\n';
-    }
-
-    function buildCutList(segs, base) {
-      const rows = segs.map(sg => framesToTc(sg.f0, base) + '  CAM ' + sg.cam);
-      rows.push(framesToTc(segs[segs.length - 1].f1, base) + '  END');
-      return rows.join('\n') + '\n';
-    }
-
-    function stampNow() {
-      const d = new Date();
-      const p = n => String(n).padStart(2, '0');
-      return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + '_' + p(d.getHours()) + p(d.getMinutes());
-    }
-
-    function rebuildEdl() {
-      lastEdl = null;
-      if (!lastTake) return;
-      const fp = EDL_FPS[edlFps()];
-      const segs = buildSegments(lastTake.cuts, lastTake.tEnd, fp.real);
-      if (!segs.length) return;
-      lastEdl = {
-        text: buildEdl(segs, fp.base, edlStart(), 'AMotionMulticam ' + lastTake.stamp),
-        list: buildCutList(segs, fp.base),
-        name: 'AMotionMulticam_' + lastTake.stamp + '.edl',
-        events: segs.length
-      };
-    }
-
-    function onEdlSettings() {
-      try { localStorage.setItem('edlFps', edlFps()); localStorage.setItem('edlStart', edlStart()); } catch (e) {}
-      rebuildEdl();
-      renderLogger();
-    }
-
-    // Before Start All: choose the opening camera. During a take: log a cut to that camera.
-    function logCut(cam) {
-      if (!take.running) { take.startCam = cam; renderLogger(); return; }
-      const last = take.cuts[take.cuts.length - 1];
-      if (last.cam === cam) return;
-      take.cuts.push({ cam: cam, t: (performance.now() - take.t0) / 1000 });
-      vibrate(30);
-      renderLogger();
-    }
-
-    function loggerBegin(tStart) {
-      if (take.running) return;
-      take.running = true;
-      take.t0 = tStart;
-      take.cuts = [{ cam: take.startCam, t: 0 }];
-      take.tEnd = null;
-      take.stamp = stampNow();
-      renderLogger();
-    }
-
-    function loggerEnd(tStop) {
-      if (!take.running) return;
-      take.running = false;
-      take.tEnd = (tStop - take.t0) / 1000;
-      lastTake = { cuts: take.cuts.slice(), tEnd: take.tEnd, stamp: take.stamp };
-      try { localStorage.setItem('lastTake', JSON.stringify(lastTake)); } catch (e) {}
-      rebuildEdl();
-      renderLogger();
-    }
-
-    function exportEdl() {
-      if (!lastEdl) { showToast('Record a take first'); return; }
-      try {
-        const blob = new Blob([lastEdl.text], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = lastEdl.name;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 5000);
-        showToast('EDL saved: ' + lastEdl.name, 4000);
-      } catch (e) { showToast('Could not save - use Copy EDL', 4000); }
-    }
-
-    function copyText(text, okMsg) {
-      try {
-        navigator.clipboard.writeText(text).then(
-          () => showToast(okMsg),
-          () => showToast('Copy failed', 3000));
-      } catch (e) { showToast('Copy failed', 3000); }
-    }
-    function copyEdl() {
-      if (!lastEdl) { showToast('Record a take first'); return; }
-      copyText(lastEdl.text, 'EDL copied');
-    }
-    function copyCutList() {
-      if (!lastEdl) { showToast('Record a take first'); return; }
-      copyText(lastEdl.list, 'Cut list copied');
-    }
-
-    function loadLoggerState() {
-      try {
-        const f = localStorage.getItem('edlFps');
-        const st = localStorage.getItem('edlStart');
-        if (f && EDL_FPS[f]) document.getElementById('edlFps').value = f;
-        if (st) document.getElementById('edlStart').value = st;
-        const lt = localStorage.getItem('lastTake');
-        if (lt) { lastTake = JSON.parse(lt); rebuildEdl(); }
-      } catch (e) {}
-    }
-
-    function renderLogger() {
-      const fp = EDL_FPS[edlFps()];
-      const cur = take.running ? take.cuts[take.cuts.length - 1].cam : take.startCam;
-      const base = 'tactile-btn h-16 rounded-xl border text-lg font-extrabold tracking-wide cursor-pointer ';
-      [1, 2, 3].forEach(n => {
-        const b = document.getElementById('btnCam' + n);
-        b.className = base + (n === cur
-          ? (take.running ? 'bg-rose-600 text-white border-rose-400/40 shadow-lg shadow-red-950/40' : 'bg-zinc-600 text-white border-zinc-400')
-          : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:bg-zinc-700');
-      });
-
-      const status = document.getElementById('loggerStatus');
-      const list = document.getElementById('loggerList');
-      const prev = document.getElementById('edlPreview');
-
-      if (take.running) {
-        status.className = 'text-[11px] text-rose-400 text-right';
-        status.textContent = 'LIVE - ' + (take.cuts.length - 1) + ' cut' + (take.cuts.length - 1 === 1 ? '' : 's');
-        list.textContent = take.cuts.slice(-4).map(c =>
-          framesToTc(Math.round(c.t * fp.real), fp.base) + '  CAM ' + c.cam).join('\n');
-        list.style.whiteSpace = 'pre-line';
-      } else {
-        status.className = 'text-[11px] text-zinc-500 text-right';
-        status.textContent = lastEdl ? 'Take ready: ' + lastEdl.events + ' event' + (lastEdl.events === 1 ? '' : 's') : 'Pick the opening camera';
-        list.textContent = lastEdl ? lastEdl.list : '';
-        list.style.whiteSpace = 'pre-line';
-      }
-      if (lastEdl && !take.running) { prev.textContent = lastEdl.text; prev.classList.remove('hidden'); }
-      else { prev.textContent = ''; prev.classList.add('hidden'); }
-    }
-
     // ================= Master tally / timecode (display) =================
     function syncMasterState() {
       const anyRec = cameras.some(c => c.recording);
@@ -1077,8 +836,6 @@
 
     renderCameras();
     renderH8();
-    loadLoggerState();
-    renderLogger();
   </script>
   <script>
     // Lets the app be installed and opened offline once it has loaded.
